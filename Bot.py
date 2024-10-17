@@ -3,7 +3,8 @@ import shelve
 import requests
 from collections import defaultdict
 from config import BOT_KEY
-from api import gpt
+from api import gpt, image
+from enum import Enum
 from telegram import ForceReply, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -15,6 +16,10 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+
+class ModelEnum(Enum):
+    gpt_text = 1
+    gpt_image = 2
 
 
 # Define a few command handlers. These usually take the two arguments update and
@@ -29,7 +34,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_data = {
             "user_name": user_name,
             "subs": "Free",
-            "tokens": 0
+            "tokens": 0,
+            "model": ModelEnum.gpt_text.value
         }
         pandora[str(user_id)] = user_data
     await update.message.reply_html (rf"Ку {pandora[str(user_id)]["user_name"]}")
@@ -48,7 +54,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"ID {user_id}\n"
             f"Подписка {subscription_type}\n\n"
         )
-
+        await update.message.reply_text(profile_text)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = (
@@ -68,14 +74,23 @@ async def process_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = str(user.id)
     pandora = shelve.open("pandora")
     tokens = pandora[user_id]["tokens"]
+    gpt_model = pandora[user_id]["model"]
     if tokens > 0:
+        if gpt_model == ModelEnum.gpt_text.value:
+         message = update.message.text
+         answer = gpt(message)
+         await update.message.reply_text(answer)
+    if gpt_model == ModelEnum.gpt_image.value:
         message = update.message.text
-        answer = gpt(message)
-        await update.message.reply_text(answer)
+        answer = image(message)
+        await update.message.reply_photo(
+            photo=answer[0],
+            caption=answer[1]
+        )
 
     else:
-         mess = "пополните баланс токенов в /store"
-         await update.message.reply_text(mess)
+     mess = "пополните баланс токенов в /store"
+     await update.message.reply_text(mess)
 
 
 def main() -> None:
@@ -89,6 +104,7 @@ def main() -> None:
     application.add_handler(CommandHandler("profile", profile))
     application.add_handler(CommandHandler("store", store))
 
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_message))
 
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
